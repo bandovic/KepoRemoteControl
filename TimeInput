@@ -1,1 +1,142 @@
+/**************************************************************
+ *
+ * RTC on V5
+ * Time Input widget on V3.
+ *
+ **************************************************************/
 
+#define BLYNK_PRINT Serial
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <SimpleTimer.h>
+#include <TimeLib.h>
+#include <WidgetRTC.h>
+#include <EEPROM.h>
+
+SimpleTimer timer;
+
+WidgetRTC rtc;
+BLYNK_ATTACH_WIDGET(rtc, V5);
+
+#define TestLED 2                 // on board LED pin assignment
+char Date[16];
+char Time[16];
+char auth[] = "c85f9839ba1947b987a08c4de812413d";
+char ssid[] = "AndroidAP";
+char pass[] = "nikond7000";
+long startsecondswd;            // weekday start time in seconds
+long stopsecondswd;             // weekday stop  time in seconds
+long nowseconds;                // time now in seconds
+// Attach virtual serial terminal to Virtual Pin V1
+WidgetTerminal terminal(V6);
+
+void setup()
+{
+  pinMode(TestLED, OUTPUT);
+  digitalWrite(TestLED, LOW); // set LED OFF
+  Serial.begin(9600);
+  Serial.println("Starting");
+  Blynk.begin(auth, ssid, pass);
+  int mytimeout = millis() / 1000;
+  while (Blynk.connect() == false) { // try to connect to server for 10 seconds
+    if((millis() / 1000) > mytimeout + 8){ // try local server if not connected within 9 seconds
+       break;
+    }
+  }
+  rtc.begin();
+  timer.setInterval(10000L, activetoday);  // check every minute if schedule should run today 
+  //timer.setInterval(30000L, reconnectBlynk);  // check every 30s if still connected to server 
+}
+
+void activetoday(){        // check if schedule should run today
+  if(year() != 1970){
+    Blynk.syncVirtual(V3); // sync timeinput widget    
+  }
+}
+
+BLYNK_WRITE(V3) {         // time input widget on V3
+  sprintf(Date, "%02d.%02d.%04d.",  day(), month(), year());
+  sprintf(Time, "%02d:%02d:%02d", hour(), minute(), second());
+  
+  TimeInputParam t(param);
+  
+  
+  Serial.print("Proveravam predefinisano paljenje: ");
+  Serial.println(Date);
+  Serial.println(Time);
+  
+
+  if(t.isWeekdaySelected((weekday() - 1))){ //Time library starts week on Sunday, Blynk on Monday
+    Serial.println("Raspored AKTIVAN danas");
+    
+    if (t.hasStartTime()) // Process start time
+    {
+      Serial.println(String("Upali grejanje u: ") + t.getStartHour() + ":" + t.getStartMinute());
+      
+    }
+    if (t.hasStopTime()) // Process stop time
+    {
+      Serial.println(String("Ugasi grejanje u: ") + t.getStopHour() + ":" + t.getStopMinute());
+      
+    }
+    // Display timezone details, for information purposes only 
+    Serial.println(String("Vremenska zona: ") + t.getTZ()); // Timezone is already added to start/stop time 
+    
+    //Serial.println(String("Time zone offset: ") + t.getTZ_Offset()); // Get timezone offset (in seconds)
+  
+    for (int i = 1; i <= 7; i++) {  // Process weekdays (1. Mon, 2. Tue, 3. Wed, ...)
+      if (t.isWeekdaySelected(i)) {
+        Serial.println(String("Dan ") + i + " je odabran");
+      }
+    } 
+    nowseconds = ((hour() * 3600) + (minute() * 60) + second());
+    startsecondswd = (t.getStartHour() * 3600) + (t.getStartMinute() * 60);
+    stopsecondswd = (t.getStopHour() * 3600) + (t.getStopMinute() * 60);
+    
+    if (nowseconds >= startsecondswd && nowseconds <= stopsecondswd)
+      { 
+        
+        int stanje = digitalRead(2);
+
+        if (stanje==0)
+          {
+          digitalWrite(TestLED, HIGH);
+          Serial.print("Grejanje se UPALILO u");
+          Serial.println(String(" ") + hour() + ":" + minute());
+          terminal.print("Grejanje se UPALILO u");
+          terminal.println(String(" ") + hour() + ":" + minute());
+          }
+
+         else if (stanje==1){
+          Serial.println("Grejanje je vec upaljeno!");
+          terminal.println("Grejanje je vec upaljeno!");
+          
+          }
+      }
+        
+     else if (nowseconds >= stopsecondswd)
+        {
+
+            digitalWrite(TestLED, LOW); // set LED OFF
+            Serial.print("Grejanje se UGASILO u");
+            Serial.println(String(" ") + t.getStopHour() + ":" + t.getStopMinute());
+            terminal.print("Grejanje se UGASILO u");
+            terminal.println(String(" ") + t.getStopHour() + ":" + t.getStopMinute());
+        }
+      }
+
+
+
+}
+
+
+
+void loop()
+{
+  if (Blynk.connected()) {
+    Blynk.run();
+    //Blynk.syncVirtual(V3);
+  }
+  timer.run();
+  
+}
