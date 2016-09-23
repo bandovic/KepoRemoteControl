@@ -1,0 +1,60 @@
+//PROMENLJIVE
+//Memorija
+byte RAM = {0x00};
+byte ROM = {0x20};
+//
+//RAM memorijske lokacije
+byte rezimRadaKotla = {0x21};
+byte nivoSnage = {0x34};
+byte trenutnaTempVode = {0x03};
+byte trenutnaTempProstora = {0x01};
+byte pritisak = {0x3C};
+
+
+
+#define BLYNK_PRINT Serial    // Comment this out to disable prints and save space
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+
+char auth[] = "b0d6b5886284448f80cf5b32fcc97208";                                     // token za identifikaciju mikrokontrolera
+
+
+
+void setup()
+{
+  Serial.begin(1200, SERIAL_8N2);                                                     //Parametri konekcije za komunikaciju sa kotlom: baud rate 1200, 8 data bits, 2 stop bits, no parity, no flow control
+  Blynk.begin(auth, "AndroidAP", "nikond7000");                                       //Parametri za povezivanje na WiFi - SSID i lozinka
+}
+
+void loop()
+{
+  Blynk.run();
+}
+                                                                                      //funkcija procitajVrednost treba da vraca vrednost koji je uvek ceo broj, zato je datatype int
+int procitajVrednost(byte memorija, byte memLokacija){                                //za read je prvi bajt memorija (0x00 RAM, 0x20 EEPROM), a drugi bajt memLokacija
+  byte komanda[] = {memorija, memLokacija};
+  Serial.write(komanda, sizeof(komanda));
+  byte buffer[2];
+  
+  if (Serial.available() >= 2) {
+    for (int i=0; i<2; i++) {
+      buffer[i] = Serial.read();
+    }
+  }
+  return (int)buffer[1];                                                              //vrati drugi bajt (value) kao ceo broj
+                                                                                      //kad pec vrati odgovor, prvi bajt je checksum, drugi bajt pretvorim u int i dodelim nekoj promenljivoj
+}
+
+void upisiVrednost(byte memorija, byte memLokacija, int vrednost){                    //za write je prvi bajt memorija (0x80 RAM, 0xA0 EEPROM), drugi bajt je memLokacija, treci argument je int value, cetvrti bajt je checksum   //Turning ON 80 21 01 A2
+  
+  byte checksum = {memorija + memLokacija + (byte)vrednost};                          //prvo se racuna checksum                                                                                                                    //Turning OFF  80 21 00 A1
+  byte komanda[] = {memorija, memLokacija, vrednost, checksum};
+  Serial.write(komanda, sizeof(komanda));
+                                                                                      //kad pec vrati odgovor, uporedim checksum, ukoliko se slaze funkcija vraca true sto znaci da je uspesno upisana vrednost
+  delay(2000); //pauza od 2 sekunde
+}
+
+BLYNK_WRITE(V1)                                                                       
+{
+procitajVrednost(RAM, rezimRadaKotla);
+}
