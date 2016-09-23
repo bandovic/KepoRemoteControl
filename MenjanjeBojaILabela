@@ -1,0 +1,113 @@
+#define BLYNK_PRINT Serial    // Comment this out to disable prints and save space
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <SimpleTimer.h>
+
+// You should get Auth Token in the Blynk App.
+// Go to the Project Settings (nut icon).
+char auth[] = "c85f9839ba1947b987a08c4de812413d";
+
+// Your WiFi credentials.
+// Set password to "" for open networks.
+char ssid[] = "AndroidAP";
+char pass[] = "nikond7000";
+SimpleTimer timer;
+
+void setup()
+{
+  Serial.begin(9600);
+  Blynk.begin(auth, ssid, pass);
+  
+}
+
+BLYNK_WRITE(V0)
+{
+  
+  int x = param.asInt(); // assigning incoming value from pin V0 to a variable
+  int y = 5;
+  float zbir = operacijaSabiranja(x, y);
+  Serial.println(x);
+  Serial.println(y);
+  Serial.println(zbir);
+  //Serial.println(pinValue);
+  
+  
+  
+  
+}
+
+float operacijaSabiranja(int x, int y){
+  float rezultat;
+
+  if (y==5){
+  rezultat = (x+y)/10;
+  }
+  else {
+  rezultat = x+y;
+  }
+  
+  return rezultat;
+  }
+
+
+void loop()
+{
+  Blynk.run();
+  timer.run(); // Initiates SimpleTimer
+}
+
+#define BLYNK_GREEN     "#23C48E"
+#define BLYNK_BLUE      "#04C0F8"
+#define BLYNK_YELLOW    "#ED9D00"
+#define BLYNK_RED       "#D3435C"
+#define BLYNK_DARK_BLUE "#5F7CD8"
+
+String gaugeColor;
+
+BLYNK_WRITE(V1) {
+  int gaugeValue = param.asInt();
+
+  String newColor;
+  if (gaugeValue > 35) {
+    newColor = BLYNK_GREEN;
+  } else if (gaugeValue > 15) {
+    newColor = BLYNK_YELLOW;
+  } else {
+    newColor = BLYNK_RED;
+  }
+
+  // Send only if changed
+  if (newColor != gaugeColor) {
+    gaugeColor = newColor;
+    Blynk.setProperty(V0, "color", gaugeColor);
+  }
+
+  Blynk.virtualWrite(V0, gaugeValue);
+}
+
+BLYNK_WRITE(V10) {
+  int gaugeValue = param.asInt();
+  String vreme = "14:00 - Cetvrtak, 22. Septembar 2016.";
+
+  String newColor;
+  if (gaugeValue == 1) {
+    newColor = BLYNK_GREEN;
+    Blynk.setProperty(V10, "label", "Kotao je upaljen u " + vreme);
+  } else {
+    newColor = BLYNK_RED;
+    Blynk.setProperty(V10, "label", "Kotao je ugasen");
+  }
+
+  // Send only if changed
+  if (newColor != gaugeColor) {
+    gaugeColor = newColor;
+    Blynk.setProperty(V10, "color", gaugeColor);
+    
+  }
+
+  Blynk.virtualWrite(V10, gaugeValue);
+  Serial.println(gaugeValue);
+}
+  
+
+
