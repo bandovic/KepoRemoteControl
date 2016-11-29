@@ -1,0 +1,348 @@
+/*********************************************************************************************************
+ * KEPO REMOTE CONTROL
+ * Autor: Bandović Vladimir
+ * bandovic@gmail.com
+ *********************************************************************************************************
+ * Ideja je da se ostvari komunikacija između mikrokontrolera (arduina) koji je povezan na internet 
+ * sa jedne strane, i kotla odnosno njegovog fabričkog mikrokontrolera sa druge strane, a sve u cilju 
+ * praćenja vitalnih parametara u toku rada kao i samog upravljanja kotlom (paljenje, gašenje, regulacija 
+ * temperature itd...) pomoću Blynk aplikacije na smart telefonu. 
+ * Nekoliko domaćih proizvođača kotlova na pelet koriste istu platformu, tako da se koncept može primeniti 
+ * ne samo na "Kepo" kotlove, nego i na kotlove "Milan Blagojević Smederevo" i "Alfa Plam Vranje".
+ *********************************************************************************************************/
+
+#define BLYNK_PRINT Serial          
+#include <SPI.h>
+#include <Ethernet.h>
+#include <BlynkSimpleEthernet.h>    
+#include <OneWire.h>
+#include <DallasTemperature.h>      
+#include <WidgetRTC.h>              
+#include <Time.h>
+#include <TimeLib.h>
+#include <SimpleTimer.h>
+
+
+SimpleTimer timer;
+
+// Sistemsko vreme se sinhronizuje preko interneta
+WidgetRTC rtc;
+BLYNK_ATTACH_WIDGET(rtc, V5);
+WidgetLCD lcd(V6);
+WidgetTerminal terminal(V13);
+
+long trenutnoVremeUSekundama;     // trenutno vreme u sekundama
+long startVremeUSekundama;        // vreme startovanja u seknudama
+long stopVremeUSekundama;         // vreme zaustavljanja u sekundama
+byte bajtOnOff[] = {0x80, 0x58, 0x5A, 0x32};
+char Date[16];
+char Time[16];
+byte memorijaRam = {0x00};
+byte zadataTempVode = {0x19};
+byte rezimRada = {0x21};
+
+char auth[] = "e522c67206cc47019b64374f2725fb9a";
+
+#define W5100_CS  10
+#define SDCARD_CS 4
+#define ONE_WIRE_BUS_1 22
+#define ONE_WIRE_BUS_2 24
+
+OneWire oneWire_in(ONE_WIRE_BUS_1);
+OneWire oneWire_out(ONE_WIRE_BUS_2);
+DallasTemperature sensor_inhouse(&oneWire_in);
+DallasTemperature sensor_outhouse(&oneWire_out);
+DeviceAddress insideThermometer;
+
+
+
+
+void setup()
+{
+  pinMode(SDCARD_CS, OUTPUT);
+  digitalWrite(SDCARD_CS, HIGH); // Isključivanje SD kartice na ethernet shield-u
+  Serial.begin(1200, SERIAL_8N2);
+  Serial1.begin(1200, SERIAL_8N2);
+  Blynk.begin(auth);
+  int mytimeout = millis() / 1000;
+  while (Blynk.connect() == false) { // ako se ne konektuje iz prve
+    if((millis() / 1000) > mytimeout + 8){
+       break;
+    }
+  }
+  rtc.begin();
+  sensor_inhouse.begin();
+  sensor_inhouse.setResolution(insideThermometer, 12);
+  sensor_outhouse.begin();
+  timer.setInterval(5000L, programiranoPaljenjeGasenje); // proverava na svakih 60 sekundi da li kotao treba da se programirano upali/ugasi
+  
+  
+}
+
+int procitajVrednost(byte memorija, byte memLokacija){                                //za read je prvi bajt memorija (0x00 RAM, 0x20 EEPROM), a drugi bajt memLokacija
+  byte komanda[] = {memorija, memLokacija};
+  Serial1.write(komanda, sizeof(komanda));
+  byte buffer[2];
+
+  // read data only when you receive 2 bytes:
+        if (Serial1.available() >= 2) {
+          for (int i=0; i<2; i++) {
+          buffer[i] = Serial1.read();
+          }
+  }
+  return (int)buffer[1];//vrati drugi bajt (value) kao ceo broj  //kad pec vrati odgovor, prvi bajt je checksum, drugi bajt pretvorim u int i dodelim nekoj promenljivoj
+}
+
+void upisiVrednost(byte memorija, byte memLokacija, int vrednost){                    //za write je prvi bajt memorija (0x80 RAM, 0xA0 EEPROM), drugi bajt je memLokacija, treci argument je int value, cetvrti bajt je checksum   //Turning ON 80 21 01 A2
+  
+  byte checksum = {memorija + memLokacija + (byte)vrednost};                          //prvo se racuna checksum                                                                                                                    //Turning OFF  80 21 00 A1
+  byte komanda[] = {memorija, memLokacija, vrednost, checksum};
+  Serial1.write(komanda, sizeof(komanda));
+}
+
+void paljenjeGasenjeKotla(){                    //simulacija komande sa daljinca, dug pritisak na power dugme   //Turning ON 80 58 5a 32
+  
+  
+  Serial1.write(bajtOnOff, sizeof(bajtOnOff));delay(100);
+  Serial1.write(bajtOnOff, sizeof(bajtOnOff));delay(100);
+  Serial1.write(bajtOnOff, sizeof(bajtOnOff));delay(100);
+  Serial1.write(bajtOnOff, sizeof(bajtOnOff));delay(100);
+  Serial1.write(bajtOnOff, sizeof(bajtOnOff));delay(100);
+  Serial1.write(bajtOnOff, sizeof(bajtOnOff));delay(100);
+  Serial1.write(bajtOnOff, sizeof(bajtOnOff));delay(100);
+  Serial1.write(bajtOnOff, sizeof(bajtOnOff));delay(100);
+}
+
+void programiranoPaljenjeGasenje(){        // proverava da li je podešeno predefinisano paljenje/gašenje
+  //if(year() != 1970){
+    //Blynk.syncVirtual(V3); // Sinhronizuj TimeInput widget na V3
+    //Blynk.syncVirtual(V4); // Sinhronizuj TimeInput widget na V4    
+    
+ // }
+    
+    sensor_inhouse.requestTemperatures();
+    sensor_outhouse.requestTemperatures();
+    float tin = sensor_inhouse.getTempCByIndex(0);    //sa 
+    //float tempC = sensor_inhouse.getTempC(deviceAddress);
+    float tout = sensor_outhouse.getTempCByIndex(0);  //sa decimalom
+    //float tempC = sensor_outhouse.getTempC(deviceAddress);
+    Serial.print("Temperatura unutra: ");
+    Serial.println(tin, 1);
+    /*lcd.print(0, 0, "Unutra: ");
+    lcd.print(0, 1, tin);
+    lcd.print(6, 1, "°C");*/
+
+    String tempUnutra = (String)tin;
+    tempUnutra += "°C";
+    Blynk.virtualWrite(V15, tempUnutra);
+    Blynk.virtualWrite(V1, tin);
+
+    int ocitanRezimRada = procitajVrednost(memorijaRam, rezimRada);
+    Blynk.virtualWrite(V10, ocitanRezimRada);
+}
+
+BLYNK_WRITE(V0) //SLAJDER ZA PODESAVANJE TEMPERATURE VODE
+{
+  int temperaturaVodeSlajder = param.asInt(); // dodeljivanje sa pina V1 promenljivoj
+  Serial.print("Zeljena temperatura vode je promenjena na "); //Kasnije ovde ide funkcija koja salje 
+  Serial.println(temperaturaVodeSlajder);                            //kotlu komandu da promeni temperaturu vode
+  upisiVrednost(memorijaRam, zadataTempVode, temperaturaVodeSlajder);
+  int rezim = procitajVrednost(memorijaRam, rezimRada);
+  lcd.print(0, 0, "Rezim rada:");
+  lcd.print(0, 1, rezim);
+  
+  
+}
+
+BLYNK_WRITE(V3) {         // time input widget on V3
+  sprintf(Date, "%02d.%02d.%04d.",  day(), month(), year());
+  sprintf(Time, "%02d:%02d:%02d", hour(), minute(), second());
+  
+  TimeInputParam t(param);
+ 
+  if(t.isWeekdaySelected((weekday() - 1))){ //Time library starts week on Sunday, Blynk on Monday
+    Serial.println("Programirani rad je danas AKTIVAN.");
+    
+    if (t.hasStartTime()) // Process start time
+    {
+      Serial.println(String("Upali grejanje u: ") + t.getStartHour() + ":" + t.getStartMinute());
+      
+    }
+    if (t.hasStopTime()) // Process stop time
+    {
+      Serial.println(String("Ugasi grejanje u: ") + t.getStopHour() + ":" + t.getStopMinute());
+      
+    }
+    
+    for (int i = 1; i <= 7; i++) {  // Process weekdays (1. Mon, 2. Tue, 3. Wed, ...)
+      if (t.isWeekdaySelected(i)) {
+        Serial.println(String("Dan ") + i + " je odabran");
+      }
+    } 
+    trenutnoVremeUSekundama = ((hour() * 3600) + (minute() * 60) + second());
+    startVremeUSekundama = (t.getStartHour() * 3600) + (t.getStartMinute() * 60);
+    stopVremeUSekundama = (t.getStopHour() * 3600) + (t.getStopMinute() * 60);
+
+    //Ako je trenutno vreme >= od start vremena i ukoliko je trenutno vreme <= od stop vremena proveri da li je upaljeno, pa ako nije upali.
+    
+    if (trenutnoVremeUSekundama >= startVremeUSekundama && trenutnoVremeUSekundama <= stopVremeUSekundama)
+      { 
+        
+        int rezim = procitajVrednost(memorijaRam, rezimRada);
+
+        switch (rezim){
+          case 0:
+          //ugasena je
+          Serial.print("Grejanje je ugaseno. Saljem komandu za paljenje.");
+          //paljenjeGasenjeKotla(); //posalji komandu za paljenje - dug pritisak na power dugme
+          //upisiVrednost(ramMemorija, rezimRada, 1); //prva varijanta
+          Serial.print("Grejanje se UPALILO u");
+          Serial.println(String(" ") + hour() + ":" + minute());
+
+          case 1:
+          //u rezimu paljenja je
+
+          case 2:
+          //u rezimu ubacivanja peleta
+
+          case 3:
+          //u rezimu detekcije plamena
+
+          case 4:
+          //u radnom rezimu je
+          Serial.println("Grejanje je vec upaljeno!");
+          lcd.print(0, 0, "Grejanje je vec");
+          lcd.print(0, 1, "upaljeno");
+
+          case 5:
+          // u rezimu ciscenja je
+          Serial.println("Kotao je u rezimu ciscenja");
+
+          case 6:
+          //
+
+          case 7:
+          //u rezimu je ciscenja pre gasenja
+          Serial.println("Kotao je u rezimu ciscenja pre gasenja");
+
+          case 8:
+          //kada se upali neki alarm
+          //ovde bi trebalo ocitati tekst sa displeja i poslati notifikaciju
+          Blynk.notify("Upaljen je alarm!");
+          Blynk.email("bandovic@gmail.com", "KepoRemoteControl - ALARM", "Detektovan je rezim rada 8 sto ukazuje da je upaljen alarm!");
+          }
+      }
+        
+     else if (trenutnoVremeUSekundama >= stopVremeUSekundama) //ako je trenutno vreme vece od predefinisanog vremena zaustavljanja, znaci da je ispunjen uslov da se kotao ugasi
+        {
+           //paljenjeGasenjeKotla(); //posalji komandu za gasenje kotla
+            Serial.println("Saljem komandu za gasenje kotla");
+            int rezim = procitajVrednost(memorijaRam, rezimRada); //ocitaj rezim rada
+            if (rezim == 7) { //rezim 7 je "cleaning final"
+            Serial.print("Pokrenuta sekvenca gasenja u");
+            Serial.println(String(" ") + t.getStopHour() + ":" + t.getStopMinute());
+            }
+        }
+      }
+
+
+/*
+BLYNK_WRITE(V4) {         // time input widget on V3
+  sprintf(Date, "%02d.%02d.%04d.",  day(), month(), year());
+  sprintf(Time, "%02d:%02d:%02d", hour(), minute(), second());
+  
+  TimeInputParam t(param);
+ 
+  if(t.isWeekdaySelected((weekday() - 1))){ //Time library starts week on Sunday, Blynk on Monday
+    Serial.println("Programirani rad je danas AKTIVAN.");
+    
+    if (t.hasStartTime()) // Process start time
+    {
+      Serial.println(String("Upali grejanje u: ") + t.getStartHour() + ":" + t.getStartMinute());
+      
+    }
+    if (t.hasStopTime()) // Process stop time
+    {
+      Serial.println(String("Ugasi grejanje u: ") + t.getStopHour() + ":" + t.getStopMinute());
+      
+    }
+    
+    for (int i = 1; i <= 7; i++) {  // Process weekdays (1. Mon, 2. Tue, 3. Wed, ...)
+      if (t.isWeekdaySelected(i)) {
+        Serial.println(String("Dan ") + i + " je odabran");
+      }
+    } 
+    trenutnoVremeUSekundama = ((hour() * 3600) + (minute() * 60) + second());
+    startVremeUSekundama = (t.getStartHour() * 3600) + (t.getStartMinute() * 60);
+    stopVremeUSekundama = (t.getStopHour() * 3600) + (t.getStopMinute() * 60);
+
+    //Ako je trenutno vreme >= od start vremena i ukoliko je trenutno vreme <= od stop vremena proveri da li je upaljeno, pa ako nije upali.
+    
+    if (trenutnoVremeUSekundama >= startVremeUSekundama && trenutnoVremeUSekundama <= stopVremeUSekundama)
+      { 
+        
+        int rezim = procitajVrednost(memorijaRam, rezimRada);
+
+        switch (rezim){
+          case 0:
+          //ugasena je
+          Serial.print("Grejanje je ugaseno. Saljem komandu za paljenje.");
+          paljenjeGasenjeKotla(); //posalji komandu za paljenje - dug pritisak na power dugme
+          //upisiVrednost(ramMemorija, rezimRada, 1); //prva varijanta
+          Serial.print("Grejanje se UPALILO u");
+          Serial.println(String(" ") + hour() + ":" + minute());
+
+          case 1:
+          //u rezimu paljenja je
+
+          case 2:
+          //u rezimu ubacivanja peleta
+
+          case 3:
+          //u rezimu detekcije plamena
+
+          case 4:
+          //u radnom rezimu je
+          Serial.println("Grejanje je vec upaljeno!");
+
+          case 5:
+          // u rezimu ciscenja je
+          Serial.println("Kotao je u rezimu ciscenja");
+
+          case 6:
+          //
+
+          case 7:
+          //u rezimu je ciscenja pre gasenja
+          Serial.println("Kotao je u rezimu ciscenja pre gasenja");
+
+          case 8:
+          //kada se upali neki alarm
+          //ovde bi trebalo ocitati tekst sa displeja i poslati notifikaciju
+          Blynk.notify("Upaljen je alarm!");
+          Blynk.email("bandovic@gmail.com", "KepoRemoteControl - ALARM", "Detektovan je rezim rada 8 sto ukazuje da je upaljen alarm!");
+          }
+      }
+        
+     else if (trenutnoVremeUSekundama >= stopVremeUSekundama) //ako je trenutno vreme vece od predefinisanog vremena zaustavljanja, znaci da je ispunjen uslov da se kotao ugasi
+        {
+            paljenjeGasenjeKotla(); //posalji komandu za gasenje kotla
+            int rezim = procitajVrednost(memorijaRam, rezimRada); //ocitaj rezim rada
+            if (rezim == 7) { //rezim 7 je "cleaning final"
+            Serial.print("Pokrenuta sekvenca gasenja u");
+            Serial.println(String(" ") + t.getStopHour() + ":" + t.getStopMinute());
+            }
+        }
+      }
+
+}
+*/
+}
+void loop()
+{
+  Blynk.run();
+  timer.run();
+  
+  
+  
+}
