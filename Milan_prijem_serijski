@@ -1,0 +1,28 @@
+uint8_t count = 0;
+byte buffer[2] = {0xFF, 0xFF};  //definisem niz od dva bajta, oba imaju istu pocetnu vrednost, decimalno 255, heksadecimalno 0xFF
+ 
+void setup()
+{
+  Serial.begin(9600);
+  Serial1.begin(9600);
+}
+ 
+void loop() {
+ 
+  while (Serial1.available() > 0 && count < 2) {
+    uint8_t num = Serial1.read();
+    buffer[count] = num;
+    count++;
+  }
+ 
+ 
+  if (buffer[1] != 0xFF && count == 2 ) {
+    //int drugiKarakter = (int)buffer[1];
+    //Serial.println("Drugi karakter je " + drugiKarakter);
+    Serial.println((char)buffer[1]);
+    buffer[0] = 0xFF;
+    buffer[1] = 0xFF;
+    count = 0;
+  }
+ 
+}
